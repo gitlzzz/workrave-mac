@@ -171,10 +171,10 @@ index 000000000..53e487885
 +#endif // WORKRAVE_UI_QT_MACOS_WINDOW_HH
 diff --git a/ui/app/toolkits/qt/platforms/macos/MacOSWindow.mm b/ui/app/toolkits/qt/platforms/macos/MacOSWindow.mm
 new file mode 100644
-index 000000000..42384694f
+index 000000000..fa6c7072a
 --- /dev/null
 +++ b/ui/app/toolkits/qt/platforms/macos/MacOSWindow.mm
-@@ -0,0 +1,58 @@
+@@ -0,0 +1,73 @@
 +// Copyright (C) 2026 Workrave contributors
 +// All rights reserved.
 +//
@@ -228,8 +228,23 @@ index 000000000..42384694f
 +      {
 +        return;
 +      }
-+    window.collectionBehavior |= NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary
-+                                 | NSWindowCollectionBehaviorStationary;
-+    [window setLevel:NSStatusWindowLevel];
++    // Qt sets FullScreenPrimary on its windows; that is mutually exclusive with
++    // FullScreenAuxiliary, and MoveToActiveSpace is mutually exclusive with
++    // CanJoinAllSpaces. OR-ing in our bits without clearing these makes AppKit
++    // reject the combination (NSException -> abort). Clear conflicts first.
++    // Wrapped defensively: a failed cosmetic window tweak must not abort the app.
++    @try
++      {
++        NSWindowCollectionBehavior behavior = window.collectionBehavior;
++        behavior &= ~(NSWindowCollectionBehaviorFullScreenPrimary | NSWindowCollectionBehaviorFullScreenNone
++                      | NSWindowCollectionBehaviorMoveToActiveSpace);
++        behavior |= NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary;
++        window.collectionBehavior = behavior;
++        [window setLevel:NSStatusWindowLevel];
++      }
++    @catch (NSException *exception)
++      {
++        NSLog(@"workrave: could not set window collection behavior: %@", exception);
++      }
 +  }
 +} // namespace MacOSWindow
