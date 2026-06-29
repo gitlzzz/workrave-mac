@@ -1,0 +1,101 @@
+diff --git a/ui/app/toolkits/qt/ExercisesPanel.cc b/ui/app/toolkits/qt/ExercisesPanel.cc
+index 0b7c99eef..4c2c31305 100644
+--- a/ui/app/toolkits/qt/ExercisesPanel.cc
++++ b/ui/app/toolkits/qt/ExercisesPanel.cc
+@@ -35,18 +35,38 @@
+ using namespace workrave::utils;
+ 
+ int ExercisesPanel::exercises_pointer = 0;
++int ExercisesPanel::live_panel_count = 0;
++int ExercisesPanel::shared_start_index = 0;
++std::vector<Exercise> ExercisesPanel::shared_exercises;
+ 
+ ExercisesPanel::ExercisesPanel(std::shared_ptr<IApplicationContext> app, bool standalone)
+   : sound_theme(app->get_sound_theme())
+   , exercises(app->get_exercises())
+ {
+-  auto exercise_list = exercises->get_exercises();
++  // With multiple monitors a break opens one window per screen. Shuffle the
++  // exercises only when the first window of the break is created, then share
++  // that order and starting exercise with the other windows so all monitors
++  // animate in sync. Each window keeps its own copy so its iterator stays valid.
++  if (live_panel_count == 0)
++    {
++      shared_exercises.clear();
++      auto exercise_list = exercises->get_exercises();
++      std::copy(exercise_list.begin(), exercise_list.end(), std::back_inserter(shared_exercises));
+ 
+-  copy(exercise_list.begin(), exercise_list.end(), back_inserter(shuffled_exercises));
++      std::random_device rd;
++      std::mt19937 g(rd());
++      std::shuffle(shared_exercises.begin(), shared_exercises.end(), g);
+ 
+-  std::random_device rd;
+-  std::mt19937 g(rd());
+-  std::shuffle(shuffled_exercises.begin(), shuffled_exercises.end(), g);
++      shared_start_index = 0;
++      if (!shared_exercises.empty())
++        {
++          // Advance the cross-break rotation once per break (not once per window).
++          shared_start_index = exercises_pointer % static_cast<int>(shared_exercises.size());
++          exercises_pointer = shared_start_index + 1;
++        }
++    }
++  live_panel_count++;
++  shuffled_exercises = shared_exercises;
+ 
+   auto *box = new QGridLayout;
+ 
+@@ -133,15 +153,22 @@ ExercisesPanel::ExercisesPanel(std::shared_ptr<IApplicationContext> app, bool st
+   setLayout(box);
+ }
+ 
++ExercisesPanel::~ExercisesPanel()
++{
++  if (live_panel_count > 0)
++    {
++      live_panel_count--;
++    }
++}
++
+ void
+ ExercisesPanel::reset()
+ {
+-  int i = adjust_exercises_pointer(1);
++  // Start every monitor's window at the same exercise in the shared order.
+   exercise_iterator = shuffled_exercises.begin();
+-  while (i > 0)
++  if (!shuffled_exercises.empty())
+     {
+-      exercise_iterator++;
+-      i--;
++      std::advance(exercise_iterator, shared_start_index % static_cast<int>(shuffled_exercises.size()));
+     }
+   exercise_num = 0;
+   paused = false;
+diff --git a/ui/app/toolkits/qt/ExercisesPanel.hh b/ui/app/toolkits/qt/ExercisesPanel.hh
+index d9325a867..7a8a4981c 100644
+--- a/ui/app/toolkits/qt/ExercisesPanel.hh
++++ b/ui/app/toolkits/qt/ExercisesPanel.hh
+@@ -34,7 +34,7 @@ class ExercisesPanel : public QWidget
+ 
+ public:
+   explicit ExercisesPanel(std::shared_ptr<IApplicationContext> app, bool standalone);
+-  ~ExercisesPanel() override = default;
++  ~ExercisesPanel() override;
+ 
+   void set_exercise_count(int num);
+   auto signal_stop() -> boost::signals2::signal<void()> &;
+@@ -85,6 +85,12 @@ private:
+   int exercise_count{0};
+   static int exercises_pointer;
+ 
++  // Shared across the per-monitor windows of a single break so every screen
++  // shows the same exercises in sync.
++  static int live_panel_count;
++  static int shared_start_index;
++  static std::vector<Exercise> shared_exercises;
++
+   boost::signals2::signal<void()> stop_signal;
+ };
+ 

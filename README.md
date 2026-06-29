@@ -58,6 +58,10 @@ open /Applications/Workrave.app
     the native window collection behavior (`CanJoinAllSpaces |
     FullScreenAuxiliary`) and a raised level. Break windows still show on every
     monitor, which is intended.
+  - On multiple monitors, each rest-break window shuffled its own exercise list,
+    so every screen showed different exercises out of sync. Fixed by shuffling
+    once per break and sharing that order + starting exercise across all the
+    break's windows.
 
 ## Patches
 
