@@ -1,0 +1,193 @@
+diff --git a/ui/app/toolkits/qt/ExercisesPanel.cc b/ui/app/toolkits/qt/ExercisesPanel.cc
+index 4c2c31305..e68b6ea9d 100644
+--- a/ui/app/toolkits/qt/ExercisesPanel.cc
++++ b/ui/app/toolkits/qt/ExercisesPanel.cc
+@@ -35,7 +35,7 @@
+ using namespace workrave::utils;
+ 
+ int ExercisesPanel::exercises_pointer = 0;
+-int ExercisesPanel::live_panel_count = 0;
++std::vector<ExercisesPanel *> ExercisesPanel::live_panels;
+ int ExercisesPanel::shared_start_index = 0;
+ std::vector<Exercise> ExercisesPanel::shared_exercises;
+ 
+@@ -47,7 +47,7 @@ ExercisesPanel::ExercisesPanel(std::shared_ptr<IApplicationContext> app, bool st
+   // exercises only when the first window of the break is created, then share
+   // that order and starting exercise with the other windows so all monitors
+   // animate in sync. Each window keeps its own copy so its iterator stays valid.
+-  if (live_panel_count == 0)
++  if (live_panels.empty())
+     {
+       shared_exercises.clear();
+       auto exercise_list = exercises->get_exercises();
+@@ -65,7 +65,7 @@ ExercisesPanel::ExercisesPanel(std::shared_ptr<IApplicationContext> app, bool st
+           exercises_pointer = shared_start_index + 1;
+         }
+     }
+-  live_panel_count++;
++  live_panels.push_back(this);
+   shuffled_exercises = shared_exercises;
+ 
+   auto *box = new QGridLayout;
+@@ -155,10 +155,7 @@ ExercisesPanel::ExercisesPanel(std::shared_ptr<IApplicationContext> app, bool st
+ 
+ ExercisesPanel::~ExercisesPanel()
+ {
+-  if (live_panel_count > 0)
+-    {
+-      live_panel_count--;
+-    }
++  live_panels.erase(std::remove(live_panels.begin(), live_panels.end(), this), live_panels.end());
+ }
+ 
+ void
+@@ -252,19 +249,33 @@ ExercisesPanel::refresh_progress()
+ }
+ 
+ void
+-ExercisesPanel::on_stop()
++ExercisesPanel::do_stop()
+ {
+   if (!stopped)
+     {
+       stopped = true;
+-      stop_signal();
++      stop_signal(); // may synchronously delete this window (replaced by the info panel)
+     }
+ }
+ 
+ void
+-ExercisesPanel::on_go_back()
++ExercisesPanel::on_stop()
+ {
+-  adjust_exercises_pointer(-1);
++  // do_stop() can delete panels, so iterate a snapshot rather than live_panels.
++  std::vector<ExercisesPanel *> panels = live_panels;
++  for (auto *panel: panels)
++    {
++      panel->do_stop();
++    }
++}
++
++void
++ExercisesPanel::go_back()
++{
++  if (shuffled_exercises.empty())
++    {
++      return;
++    }
+   if (exercise_iterator == shuffled_exercises.begin())
+     {
+       exercise_iterator = --(shuffled_exercises.end());
+@@ -277,9 +288,12 @@ ExercisesPanel::on_go_back()
+ }
+ 
+ void
+-ExercisesPanel::on_go_forward()
++ExercisesPanel::go_forward()
+ {
+-  adjust_exercises_pointer(1);
++  if (shuffled_exercises.empty())
++    {
++      return;
++    }
+   exercise_iterator++;
+   if (exercise_iterator == shuffled_exercises.end())
+     {
+@@ -288,6 +302,24 @@ ExercisesPanel::on_go_forward()
+   start_exercise();
+ }
+ 
++void
++ExercisesPanel::on_go_back()
++{
++  for (auto *panel: live_panels)
++    {
++      panel->go_back();
++    }
++}
++
++void
++ExercisesPanel::on_go_forward()
++{
++  for (auto *panel: live_panels)
++    {
++      panel->go_forward();
++    }
++}
++
+ void
+ ExercisesPanel::refresh_pause()
+ {
+@@ -313,8 +345,12 @@ ExercisesPanel::refresh_pause()
+ void
+ ExercisesPanel::on_pause()
+ {
+-  paused = !paused;
+-  refresh_pause();
++  bool new_paused = !paused;
++  for (auto *panel: live_panels)
++    {
++      panel->paused = new_paused;
++      panel->refresh_pause();
++    }
+ }
+ 
+ void
+@@ -334,15 +370,23 @@ ExercisesPanel::heartbeat()
+   exercise_time++;
+   if (exercise_time >= exercise.duration)
+     {
+-      on_go_forward();
++      // Advance this window only; every window ticks together, so they stay in
++      // sync without re-broadcasting (which would advance several times).
++      go_forward();
+       exercise_num++;
+-      if (exercise_num == exercise_count)
++      bool finished = (exercise_num == exercise_count);
++
++      // do_stop() below may delete this window, so play the sound (copy the
++      // shared_ptr) and stop last, then return without touching members.
++      auto theme = sound_theme;
++      if (theme)
+         {
+-          on_stop();
++          theme->play_sound(finished ? SoundEvent::ExercisesEnded : SoundEvent::ExerciseEnded);
+         }
+-      if (sound_theme)
++      if (finished)
+         {
+-          sound_theme->play_sound(stopped ? SoundEvent::ExercisesEnded : SoundEvent::ExerciseEnded);
++          do_stop();
++          return;
+         }
+     }
+   else
+diff --git a/ui/app/toolkits/qt/ExercisesPanel.hh b/ui/app/toolkits/qt/ExercisesPanel.hh
+index 7a8a4981c..67b2377a1 100644
+--- a/ui/app/toolkits/qt/ExercisesPanel.hh
++++ b/ui/app/toolkits/qt/ExercisesPanel.hh
+@@ -48,6 +48,11 @@ private:
+   void on_go_forward();
+   void on_pause();
+   void on_stop();
++  // Local (single-window) actions; the on_* slots broadcast these to every
++  // window of the break so all monitors mirror each other.
++  void go_back();
++  void go_forward();
++  void do_stop();
+   void start_exercise();
+   void show_image();
+   void refresh_progress();
+@@ -86,8 +91,9 @@ private:
+   static int exercises_pointer;
+ 
+   // Shared across the per-monitor windows of a single break so every screen
+-  // shows the same exercises in sync.
+-  static int live_panel_count;
++  // shows the same exercises in sync, and so a button press in one window can
++  // be mirrored to all of them.
++  static std::vector<ExercisesPanel *> live_panels;
+   static int shared_start_index;
+   static std::vector<Exercise> shared_exercises;
+ 

@@ -62,6 +62,11 @@ open /Applications/Workrave.app
     so every screen showed different exercises out of sync. Fixed by shuffling
     once per break and sharing that order + starting exercise across all the
     break's windows.
+  - The exercise controls (next / previous / pause / stop) only affected the
+    window they were clicked in. Fixed by broadcasting each press to every
+    window of the break, so all monitors mirror one another. (Also fixed a
+    latent use-after-free where the heartbeat touched the panel after the
+    "stop" path had already deleted it.)
 
 ## Patches
 
