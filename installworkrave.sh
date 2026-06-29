@@ -34,8 +34,17 @@ BREW="$(brew --prefix)"
 # Distro/system-wide include paths are ignored, so installing via the wrong python fails silently.
 "$BREW/bin/python3" -m pip install --break-system-packages Jinja2
 
+SCRIPT_DIR="${0:A:h}"
+
 if [[ ! -d ./workrave ]]; then
     git clone https://github.com/rcaelers/workrave.git
+    # Apply local fixes against a fresh checkout. Currently: guard a null sound_theme
+    # that crashes the rest-break exercises player on macOS (SIGSEGV in SoundTheme).
+    for patch in "$SCRIPT_DIR"/patches/*.patch; do
+        [[ -e "$patch" ]] || continue
+        echo "Applying $(basename "$patch")"
+        git -C workrave apply "$patch"
+    done
 fi
 
 SRC="$PWD/workrave"

@@ -1,0 +1,25 @@
+diff --git a/ui/app/toolkits/qt/ExercisesPanel.cc b/ui/app/toolkits/qt/ExercisesPanel.cc
+index d1568e5d8..0b7c99eef 100644
+--- a/ui/app/toolkits/qt/ExercisesPanel.cc
++++ b/ui/app/toolkits/qt/ExercisesPanel.cc
+@@ -208,7 +208,7 @@ ExercisesPanel::refresh_sequence()
+         }
+ 
+       show_image();
+-      if (exercise_time != 0)
++      if (exercise_time != 0 && sound_theme)
+         {
+           sound_theme->play_sound(SoundEvent::ExerciseStep);
+         }
+@@ -313,7 +313,10 @@ ExercisesPanel::heartbeat()
+         {
+           on_stop();
+         }
+-      sound_theme->play_sound(stopped ? SoundEvent::ExercisesEnded : SoundEvent::ExerciseEnded);
++      if (sound_theme)
++        {
++          sound_theme->play_sound(stopped ? SoundEvent::ExercisesEnded : SoundEvent::ExerciseEnded);
++        }
+     }
+   else
+     {

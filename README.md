@@ -45,6 +45,16 @@ open /Applications/Workrave.app
   the app on launch (`CODESIGNING, Code 2 Invalid Page`). The script re-signs the
   whole bundle inside-out and removes a self-referential symlink that breaks
   `codesign --deep`.
+- **Rest-break exercises crash** — the exercises player dereferences the sound
+  theme without a null check, so it SIGSEGVs (null `this` in `SoundTheme`) when
+  the context's sound theme is unset. `patches/` holds a small source fix that the
+  script applies to a fresh checkout after cloning.
+
+## Patches
+
+Any `*.patch` in `patches/` is applied (via `git apply`) to the freshly cloned
+Workrave source. These are local fixes not yet upstream; see the file header for
+what each one does.
 
 ## Notes
 
