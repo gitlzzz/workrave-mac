@@ -1,0 +1,235 @@
+diff --git a/ui/app/toolkits/qt/BreakWindow.cc b/ui/app/toolkits/qt/BreakWindow.cc
+index 17a1a1050..4fa24b332 100644
+--- a/ui/app/toolkits/qt/BreakWindow.cc
++++ b/ui/app/toolkits/qt/BreakWindow.cc
+@@ -33,6 +33,10 @@
+ #include "UiUtil.hh"
+ #include "IToolkitPrivate.hh"
+ 
++#if defined(PLATFORM_OS_MACOS)
++#  include "MacOSWindow.hh"
++#endif
++
+ using namespace workrave;
+ using namespace workrave::utils;
+ 
+@@ -475,6 +479,12 @@ BreakWindow::start()
+   // set_skip_taskbar_hint(true);
+   // WindowHints::set_always_on_top(this, true);
+   raise();
++
++#if defined(PLATFORM_OS_MACOS)
++  // Qt's WindowStaysOnTopHint alone does not float above full-screen apps or
++  // show on other Spaces; make the break visible regardless of the active Space.
++  MacOSWindow::set_all_spaces_and_raised(winId());
++#endif
+ }
+ 
+ void
+diff --git a/ui/app/toolkits/qt/CMakeLists.txt b/ui/app/toolkits/qt/CMakeLists.txt
+index 74f02033c..2b75aaac2 100644
+--- a/ui/app/toolkits/qt/CMakeLists.txt
++++ b/ui/app/toolkits/qt/CMakeLists.txt
+@@ -36,9 +36,11 @@ if (PLATFORM_OS_MACOS)
+   target_sources(workrave-toolkit-qt PRIVATE
+     ToolkitMacOS.cc
+     platforms/macos/MouseMonitor.cc
+-    platforms/macos/MacOSDesktopWindow.cc)
++    platforms/macos/MacOSDesktopWindow.cc
++    platforms/macos/MacOSWindow.mm)
+ 
+     set_source_files_properties(BreakWindow.cc PreludeWindow.cc ToolkitMacOS.cc platforms/macos/MouseMonitor.cc platforms/macos/MacOSDesktopWindow.cc PROPERTIES COMPILE_FLAGS "-x objective-c++ -fobjc-arc")
++    set_source_files_properties(platforms/macos/MacOSWindow.mm PROPERTIES COMPILE_FLAGS "-fobjc-arc")
+     target_include_directories(workrave-toolkit-qt PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/platforms/macos)
+ endif()
+ 
+diff --git a/ui/app/toolkits/qt/MainWindow.cc b/ui/app/toolkits/qt/MainWindow.cc
+index ea6865eaf..b33fcb648 100644
+--- a/ui/app/toolkits/qt/MainWindow.cc
++++ b/ui/app/toolkits/qt/MainWindow.cc
+@@ -22,6 +22,7 @@
+ #include "MainWindow.hh"
+ 
+ #include <QMoveEvent>
++#include <QShowEvent>
+ #include <QApplication>
+ #include <QScreen>
+ #include <QWindow>
+@@ -32,6 +33,10 @@
+ #include "ToolkitMenu.hh"
+ #include "commonui/MenuDefs.hh"
+ 
++#if defined(PLATFORM_OS_MACOS)
++#  include "MacOSWindow.hh"
++#endif
++
+ MainWindow::MainWindow(std::shared_ptr<IApplicationContext> app, QWidget *parent)
+   : QWidget(parent)
+ {
+@@ -120,6 +125,17 @@ MainWindow::on_show_contextmenu(const QPoint &pos)
+   menu->get_menu()->popup(globalPos);
+ }
+ 
++void
++MainWindow::showEvent(QShowEvent *event)
++{
++  QWidget::showEvent(event);
++#if defined(PLATFORM_OS_MACOS)
++  // Qt::Tool windows are NSPanels that hide when the app is not frontmost.
++  // Workrave runs in the background, so without this the timer box disappears.
++  MacOSWindow::set_hides_on_deactivate(winId(), false);
++#endif
++}
++
+ void
+ MainWindow::moveEvent(QMoveEvent *event)
+ {
+diff --git a/ui/app/toolkits/qt/MainWindow.hh b/ui/app/toolkits/qt/MainWindow.hh
+index 957e2f336..f69e5954e 100644
+--- a/ui/app/toolkits/qt/MainWindow.hh
++++ b/ui/app/toolkits/qt/MainWindow.hh
+@@ -36,6 +36,7 @@ public:
+   void heartbeat();
+ 
+   void moveEvent(QMoveEvent *event) override;
++  void showEvent(QShowEvent *event) override;
+ 
+ public Q_SLOTS:
+   void on_show_contextmenu(const QPoint &pos);
+diff --git a/ui/app/toolkits/qt/PreludeWindow.cc b/ui/app/toolkits/qt/PreludeWindow.cc
+index 06513e0a3..f4a179b64 100644
+--- a/ui/app/toolkits/qt/PreludeWindow.cc
++++ b/ui/app/toolkits/qt/PreludeWindow.cc
+@@ -38,6 +38,7 @@ using namespace workrave::utils;
+ 
+ #if defined(PLATFORM_OS_MACOS)
+ #  import <Cocoa/Cocoa.h>
++#  include "MacOSWindow.hh"
+ #endif
+ 
+ PreludeWindow::PreludeWindow(QScreen *screen, workrave::BreakId break_id)
+@@ -102,10 +103,6 @@ PreludeWindow::PreludeWindow(QScreen *screen, workrave::BreakId break_id)
+ 
+   setLayout(layout);
+ 
+-  // NSView *nsview = (__bridge NSView *)reinterpret_cast<void *>(winId());
+-  // NSWindow *nswindow = [nsview window];
+-  // [nswindow setCollectionBehavior: (NSWindowCollectionBehaviorCanJoinAllSpaces)];
+-
+   setWindowFlags(
+ #if defined(PLATFORM_OS_MACOS)
+     Qt::SubWindow |
+@@ -134,6 +131,8 @@ PreludeWindow::start()
+   setGeometry(QStyle::alignedRect(Qt::LeftToRight, Qt::AlignCenter, size(), rect));
+ 
+ #if defined(PLATFORM_OS_MACOS)
++  // Float above full-screen apps and show on every Space (Qt hints are not enough).
++  MacOSWindow::set_all_spaces_and_raised(winId());
+   mouse_monitor->start();
+ #endif
+ }
+diff --git a/ui/app/toolkits/qt/platforms/macos/MacOSWindow.hh b/ui/app/toolkits/qt/platforms/macos/MacOSWindow.hh
+new file mode 100644
+index 000000000..53e487885
+--- /dev/null
++++ b/ui/app/toolkits/qt/platforms/macos/MacOSWindow.hh
+@@ -0,0 +1,35 @@
++// Copyright (C) 2026 Workrave contributors
++// All rights reserved.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program.  If not, see <http://www.gnu.org/licenses/>.
++//
++
++#ifndef WORKRAVE_UI_QT_MACOS_WINDOW_HH
++#define WORKRAVE_UI_QT_MACOS_WINDOW_HH
++
++#include <qwindowdefs.h> // WId
++
++namespace MacOSWindow
++{
++  // Keep a window visible even when Workrave is not the active application.
++  // macOS hides Qt::Tool windows (NSPanel) on deactivation, which makes the
++  // timer box vanish whenever another app is focused.
++  void set_hides_on_deactivate(WId winid, bool hides);
++
++  // Allow a window to appear on every Space and above full-screen apps, and
++  // raise its level so breaks/preludes are not hidden behind other windows.
++  void set_all_spaces_and_raised(WId winid);
++} // namespace MacOSWindow
++
++#endif // WORKRAVE_UI_QT_MACOS_WINDOW_HH
+diff --git a/ui/app/toolkits/qt/platforms/macos/MacOSWindow.mm b/ui/app/toolkits/qt/platforms/macos/MacOSWindow.mm
+new file mode 100644
+index 000000000..42384694f
+--- /dev/null
++++ b/ui/app/toolkits/qt/platforms/macos/MacOSWindow.mm
+@@ -0,0 +1,58 @@
++// Copyright (C) 2026 Workrave contributors
++// All rights reserved.
++//
++// This program is free software: you can redistribute it and/or modify
++// it under the terms of the GNU General Public License as published by
++// the Free Software Foundation, either version 3 of the License, or
++// (at your option) any later version.
++//
++// This program is distributed in the hope that it will be useful,
++// but WITHOUT ANY WARRANTY; without even the implied warranty of
++// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
++// GNU General Public License for more details.
++//
++// You should have received a copy of the GNU General Public License
++// along with this program.  If not, see <http://www.gnu.org/licenses/>.
++//
++
++#include "MacOSWindow.hh"
++
++#import <Cocoa/Cocoa.h>
++
++namespace
++{
++  // On macOS, Qt's WId is the NSView backing the QWindow.
++  NSWindow *ns_window(WId winid)
++  {
++    if (winid == 0)
++      {
++        return nil;
++      }
++    NSView *view = (__bridge NSView *)reinterpret_cast<void *>(winid);
++    return [view window];
++  }
++} // namespace
++
++namespace MacOSWindow
++{
++  void set_hides_on_deactivate(WId winid, bool hides)
++  {
++    NSWindow *window = ns_window(winid);
++    if (window != nil)
++      {
++        [window setHidesOnDeactivate:hides];
++      }
++  }
++
++  void set_all_spaces_and_raised(WId winid)
++  {
++    NSWindow *window = ns_window(winid);
++    if (window == nil)
++      {
++        return;
++      }
++    window.collectionBehavior |= NSWindowCollectionBehaviorCanJoinAllSpaces | NSWindowCollectionBehaviorFullScreenAuxiliary
++                                 | NSWindowCollectionBehaviorStationary;
++    [window setLevel:NSStatusWindowLevel];
++  }
++} // namespace MacOSWindow

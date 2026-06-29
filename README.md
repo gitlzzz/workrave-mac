@@ -49,6 +49,15 @@ open /Applications/Workrave.app
   theme without a null check, so it SIGSEGVs (null `this` in `SoundTheme`) when
   the context's sound theme is unset. `patches/` holds a small source fix that the
   script applies to a fresh checkout after cloning.
+- **Window visibility on macOS** (multi-monitor / full-screen):
+  - The timer ("mini") window used `Qt::Tool`, which on macOS hides whenever
+    Workrave isn't the active app. Fixed by setting the native window's
+    `hidesOnDeactivate` to `NO`.
+  - Break and prelude windows relied only on Qt's stay-on-top hint, so they
+    wouldn't appear over full-screen apps or on other Spaces. Fixed by setting
+    the native window collection behavior (`CanJoinAllSpaces |
+    FullScreenAuxiliary`) and a raised level. Break windows still show on every
+    monitor, which is intended.
 
 ## Patches
 
