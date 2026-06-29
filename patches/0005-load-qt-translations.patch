@@ -1,0 +1,58 @@
+diff --git a/ui/app/toolkits/qt/Toolkit.cc b/ui/app/toolkits/qt/Toolkit.cc
+index 504085031..1a9516306 100644
+--- a/ui/app/toolkits/qt/Toolkit.cc
++++ b/ui/app/toolkits/qt/Toolkit.cc
+@@ -22,6 +22,10 @@
+ #include "Toolkit.hh"
+ 
+ #include <QApplication>
++#include <QLocale>
++#include <QTranslator>
++
++#include "utils/Paths.hh"
+ 
+ #include "Icon.hh"
+ #include "DailyLimitWindow.hh"
+@@ -48,6 +52,30 @@ void
+ Toolkit::preinit(std::shared_ptr<workrave::config::IConfigurator> config)
+ {
+   TRACE_ENTRY();
++  init_translations();
++}
++
++void
++Toolkit::init_translations()
++{
++  // The bundled workrave_<locale>.qm files were never loaded: the Qt UI uses
++  // tr(), but no QTranslator was installed, so the UI always stayed English.
++  // Load the catalog for the configured locale (or the system locale). Takes
++  // effect on the next launch, since the widgets are translated as they are built.
++  std::string locale_name = GUIConfig::locale()();
++  QLocale locale = locale_name.empty() ? QLocale::system() : QLocale(QString::fromStdString(locale_name));
++
++  for (const auto &dir: workrave::utils::Paths::get_data_directories())
++    {
++      QString translations_dir = QString::fromStdString((dir / "translations").string());
++      auto *translator = new QTranslator(this);
++      if (translator->load(locale, QStringLiteral("workrave"), QStringLiteral("_"), translations_dir, QStringLiteral(".qm")))
++        {
++          installTranslator(translator);
++          break;
++        }
++      delete translator;
++    }
+ }
+ 
+ void
+diff --git a/ui/app/toolkits/qt/Toolkit.hh b/ui/app/toolkits/qt/Toolkit.hh
+index e055588a8..ab4321c79 100644
+--- a/ui/app/toolkits/qt/Toolkit.hh
++++ b/ui/app/toolkits/qt/Toolkit.hh
+@@ -86,6 +86,7 @@ public Q_SLOTS:
+   void on_timer();
+ 
+ private:
++  void init_translations();
+   void show_about();
+   void show_debug();
+   void show_exercises();

@@ -67,6 +67,11 @@ open /Applications/Workrave.app
     window of the break, so all monitors mirror one another. (Also fixed a
     latent use-after-free where the heartbeat touched the panel after the
     "stop" path had already deleted it.)
+- **Language selection did nothing** — the Qt UI uses `tr()` and the build
+  bundles `workrave_<locale>.qm` files, but no `QTranslator` was ever installed,
+  so the UI always stayed English. Fixed by loading the catalog for the
+  configured locale at startup. (Takes effect on the next launch, since widgets
+  are translated as they are built.)
 
 ## Patches
 
